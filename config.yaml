@@ -1,0 +1,9 @@
+collection:
+  api_timeout: 15
+  suggested_interval: hourly
+dashboard:
+  db_path: dashboard.db
+  streamlit_port: 8501
+hermes_dir: /mnt/c/Users/Cristian Valverde/AppData/Local/hermes
+openrouter:
+  base_url: https://openrouter.ai/api/v1

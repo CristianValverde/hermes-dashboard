@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.bak*
+*.backup*
+*.pid
+.env*
+
+# Database
+dashboard.db
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temp
+fix_errors_tab.py
+*.txt
+old_errors_function.txt
+skill-catalog.json
+mejoras_dashboard.md
