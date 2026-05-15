@@ -19,3 +19,9 @@ fix_errors_tab.py
 old_errors_function.txt
 skill-catalog.json
 mejoras_dashboard.md
+
+# Python venv
+api/venv/
+__pycache__/
+*.pyc
+*.pid
