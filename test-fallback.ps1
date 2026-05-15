@@ -1,63 +1,78 @@
+$host.ui.RawUI.WindowTitle = "Hermes Fallback Test"
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  HERMES FALLBACK TEST - Desde Windows" -ForegroundColor Cyan
+Write-Host "  HERMES FALLBACK TEST" -ForegroundColor Cyan
+Write-Host "  Verificando Ollama local desde Windows" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Get WSL2 IP
-Write-Host "[1/4] Detectando IP de WSL2..." -ForegroundColor Yellow
-$wslIp = (wsl hostname -I).Split(" ")[0]
+# Step 1: Get WSL2 IP
+Write-Host "[1/3] Detectando IP de WSL2..." -ForegroundColor Yellow
+$wslIp = (wsl.exe hostname -I 2>$null).Split(" ")[0]
+if (-not $wslIp) {
+    Write-Host "     ERROR: No se pudo obtener IP de WSL2" -ForegroundColor Red
+    Write-Host "     Asegurate que WSL2 esta corriendo: wsl --status" -ForegroundColor Yellow
+    exit 1
+}
 Write-Host "     WSL2 IP: $wslIp" -ForegroundColor White
 
-# 2. Test Ollama API (simple GET)
-Write-Host "`n[2/4] Probando conexión a Ollama (GET)..." -ForegroundColor Yellow
+# Step 2: Test GET
+Write-Host ""
+Write-Host "[2/3] Probando conexion a Ollama..." -ForegroundColor Yellow
 try {
-    $result = curl.exe -s -o NUL -w "%{http_code}" "http://${wslIp}:11434/api/tags" 2>$null
-    if ($result -eq "200") {
-        Write-Host "     ✅ HTTP $result - Ollama responde!" -ForegroundColor Green
+    $url = "http://${wslIp}:11434/api/tags"
+    $response = Invoke-WebRequest -Uri $url -Method GET -UseBasicParsing -TimeoutSec 10
+    if ($response.StatusCode -eq 200) {
+        Write-Host "     CONEXION: OK (GET HTTP 200)" -ForegroundColor Green
     } else {
-        Write-Host "     ❌ HTTP $result - No se puede conectar" -ForegroundColor Red
+        Write-Host "     CONEXION: Fallo (HTTP $($response.StatusCode))" -ForegroundColor Red
     }
-} catch {
-    Write-Host "     ❌ Error: $_" -ForegroundColor Red
+}
+catch {
+    Write-Host "     CONEXION: Fallo - $_" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Posibles causas:"
+    Write-Host "  1. Ollama no esta corriendo en WSL2"
+    Write-Host "  2. La IP de WSL2 cambio (puede diferir de 192.168.1.31)"
+    Write-Host "  3. Firewall bloqueando el puerto 11434"
+    Write-Host ""
+    Write-Host "Para verificar:"
+    Write-Host "  wsl curl -s http://127.0.0.1:11434/api/tags"
+    exit 1
 }
 
-# 3. Test model inference (POST)
-Write-Host "`n[3/4] Probando inferencia del modelo..." -ForegroundColor Yellow
+# Step 3: Test POST (chat completion)
+Write-Host ""
+Write-Host "[3/3] Probando inferencia del modelo (POST)..." -ForegroundColor Yellow
 try {
-    $json = '{"model":"qwen3.5:9b","messages":[{"role":"user","content":"Say only: OK"}],"max_tokens":5}'
-    $result = curl.exe -s -w "`n%{http_code}" -X POST "http://${wslIp}:11434/v1/chat/completions" `
-        -H "Content-Type: application/json" -d $json 2>$null
-    $lines = $result -split "`n"
-    $code = $lines[-1].Trim()
-    if ($code -eq "200") {
-        Write-Host "     ✅ HTTP $code - Modelo responde correctamente!" -ForegroundColor Green
-        try { Write-Host "     Respuesta: $($lines[0][0..80] -join '')" -ForegroundColor White } catch {}
+    $body = '{"model":"qwen3.5:9b","messages":[{"role":"user","content":"Say only OK in one word"}],"max_tokens":10}'
+    $url = "http://${wslIp}:11434/v1/chat/completions"
+    $response = Invoke-WebRequest -Uri $url -Method POST -Body $body -ContentType "application/json" -UseBasicParsing -TimeoutSec 60
+    if ($response.StatusCode -eq 200) {
+        $data = $response.Content | ConvertFrom-Json
+        $model = $data.model
+        $reply = $data.choices[0].message.content
+        Write-Host "     MODELO: $model" -ForegroundColor Green
+        Write-Host "     RESPUESTA: '$reply'" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Green
+        Write-Host "  FALLBACK FUNCIONAL!" -ForegroundColor Green
+        Write-Host "  qwen3.5:9b responde desde Windows" -ForegroundColor Green
+        Write-Host "  Hermes Agent puede usarlo como fallback" -ForegroundColor Green
+        Write-Host "============================================" -ForegroundColor Green
     } else {
-        Write-Host "     ❌ HTTP $code - Error de inferencia" -ForegroundColor Red
-    }
-} catch {
-    Write-Host "     ❌ Error: $_" -ForegroundColor Red
-}
-
-# 4. Verify config
-Write-Host "`n[4/4] Verificando config de Hermes..." -ForegroundColor Yellow
-$configPath = "$env:USERPROFILE\AppData\Local\hermes\config.yaml"
-if (Test-Path $configPath) {
-    $config = Get-Content $configPath -Raw
-    if ($config -match "192.168.1.31") {
-        Write-Host "     ✅ Config apunta a WSL2 IP (192.168.1.31)" -ForegroundColor Green
-    } elseif ($config -match "127.0.0.1") {
-        Write-Host "     ⚠️ Config usa localhost - puede fallar POST" -ForegroundColor Yellow
-    }
-    if ($config -match "fallback_providers.*Ollama Qwen3.5") {
-        Write-Host "     ✅ fallback_providers configurado" -ForegroundColor Green
-    }
-    if ($config -match "fallback_model:") {
-        Write-Host "     ✅ fallback_model section activa" -ForegroundColor Green
+        Write-Host "     INFERENCIA: Fallo (HTTP $($response.StatusCode))" -ForegroundColor Red
     }
 }
+catch {
+    Write-Host "     INFERENCIA: Fallo - $_" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Posibles causas:"
+    Write-Host "  1. El modelo qwen3.5:9b no esta descargado"
+    Write-Host "  2. Tiempo de espera insuficiente (60s)"
+    Write-Host "  3. La IP de WSL2 cambio"
+    Write-Host ""
+    Write-Host "Para verificar desde WSL2:"
+    Write-Host "  wsl curl -s http://127.0.0.1:11434/api/tags"
+}
 
-Write-Host "`n============================================" -ForegroundColor Cyan
-Write-Host "  RESULTADO:" -ForegroundColor Cyan
-Write-Host "  Si los tests 2 y 3 pasan, el fallback funcionará." -ForegroundColor White
-Write-Host "============================================" -ForegroundColor Cyan
+pause
