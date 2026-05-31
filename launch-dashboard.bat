@@ -1,29 +1,18 @@
 @echo off
-title Hermes Dashboard v6 - React+Flask
-
-echo ============================================
-echo   HERMES DASHBOARD v6
-echo   React + Flask
-echo ============================================
-echo.
-
+title Hermes Dashboard - React+Flask
 cd /d "%~dp0api"
 
-echo [1/2] Verificando dependencias...
-python -c "import flask" 2>nul
-if %errorlevel% neq 0 (
-    echo [!] Instalando Flask...
-    pip install flask
+REM Try Hermes venv Python first
+set VENV_PY=%LOCALAPPDATA%\hermes\hermes-agent\venv\Scripts\python.exe
+if exist "%VENV_PY%" (
+    echo [Hermes Dashboard] Using Hermes venv Python
+    start "" "http://localhost:8590"
+    "%VENV_PY%" flask_app.py
+    goto :eof
 )
 
-echo [2/2] Iniciando servidor...
-echo.
-echo   Dashboard: http://localhost:8502
-echo   Cerrar:    Ctrl+C en esta ventana
-echo.
-echo ============================================
+REM Fallback
+echo [Hermes Dashboard] Using system Python
+start "" "http://localhost:8590"
 python flask_app.py
-
-echo.
-echo Servidor detenido.
 pause

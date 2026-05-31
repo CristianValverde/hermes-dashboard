@@ -96,3 +96,20 @@ SELECT model, session_count, estimated_cost_usd, total_tokens,
 FROM model_stats
 WHERE total_tokens > 0
 ORDER BY estimated_cost_usd DESC;
+
+-- OpenRouter daily activity (from /api/v1/activity endpoint)
+CREATE TABLE IF NOT EXISTS openrouter_daily_usage (
+    date                TEXT NOT NULL,
+    model               TEXT NOT NULL,
+    endpoint_id         TEXT,
+    prompt_tokens       INTEGER DEFAULT 0,
+    completion_tokens   INTEGER DEFAULT 0,
+    reasoning_tokens    INTEGER DEFAULT 0,
+    requests            INTEGER DEFAULT 0,
+    usage               REAL DEFAULT 0.0,
+    provider_name       TEXT,
+    model_permaslug     TEXT,
+    byok_usage_inference REAL DEFAULT 0.0,
+    collected_at        REAL NOT NULL,
+    PRIMARY KEY (date, model, endpoint_id)
+);

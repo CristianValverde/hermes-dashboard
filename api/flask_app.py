@@ -13,7 +13,123 @@ import mimetypes
 mimetypes.add_type('text/javascript', '.jsx')
 mimetypes.add_type('text/javascript', '.mjs')
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'dashboard.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "dashboard.db")
+
+COLLECTOR_PATH = os.path.join(os.path.dirname(__file__), "..", "collector.py")
+
+
+def run_collector():
+    """Run collector via subprocess before serving the dashboard.
+
+    Ensures data is always fresh on dashboard open. Replaces hourly cron.
+    Runs incrementally - typically <3s for recent sessions.
+    """
+    import subprocess, sys
+    python = sys.executable
+    start = time.time()
+    print("[collector] Running...", end=" ", flush=True)
+    try:
+        result = subprocess.run(
+            [python, COLLECTOR_PATH],
+            capture_output=True, text=True, timeout=120,
+            cwd=os.path.dirname(COLLECTOR_PATH),
+        )
+        elapsed = time.time() - start
+        if result.returncode == 0:
+            print(f"done in {elapsed:.1f}s")
+        else:
+            print(f"exit {result.returncode} in {elapsed:.1f}s")
+            if result.stderr:
+                for line in result.stderr.strip().split("\n")[-3:]:
+                    print(f"  ! {line}")
+    except subprocess.TimeoutExpired:
+        print(f"timed out after 120s")
+    except Exception as e:
+        print(f"error: {e}")
+
+
+import re
+from collections import defaultdict
+
+AGENT_LOG_PATH = os.path.expanduser("~/AppData/Local/hermes/logs/agent.log")
+
+
+def load_agent_log_metrics():
+    """Parse agent.log for response latency, api_calls, and chars per response.
+    
+    Returns dict with avg/median/P95 metrics and daily trend.
+    """
+    log_path = os.path.expanduser("~/AppData/Local/hermes/logs/agent.log")
+    if not os.path.exists(log_path):
+        return {"avgTime": 0, "medianTime": 0, "p95Time": 0, "avgApiCalls": 0,
+                "totalResponses": 0, "trend": [], "audioCount": 0, "fallbackCount": 0}
+    
+    # Read last 200KB for recent metrics
+    size = os.path.getsize(log_path)
+    with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+        if size > 204800:
+            f.seek(size - 204800)
+            f.readline()  # skip partial line
+        content = f.read()
+    
+    times = []
+    calls = []
+    chars = []
+    daily_times = defaultdict(list)
+    audio_count = 0
+    fallback_count = 0
+    warning_count = 0
+    
+    for line in content.split('\n'):
+        # Response metrics
+        m = re.search(r'response ready:.*?time=([\d.]+)s api_calls=(\d+) response=(\d+) chars', line)
+        if m:
+            t = float(m.group(1))
+            times.append(t)
+            calls.append(int(m.group(2)))
+            chars.append(int(m.group(3)))
+            # Extract date from log line
+            date_m = re.match(r'(\d{4}-\d{2}-\d{2})', line)
+            if date_m:
+                daily_times[date_m.group(1)].append(t)
+        
+        if 'Processing audio with duration' in line:
+            audio_count += 1
+        if 'fallback' in line.lower():
+            fallback_count += 1
+        if 'WARNING' in line:
+            warning_count += 1
+    
+    if not times:
+        return {"avgTime": 0, "medianTime": 0, "p95Time": 0, "avgApiCalls": 0,
+                "totalResponses": 0, "trend": [], "audioCount": 0, "fallbackCount": 0}
+    
+    times_sorted = sorted(times)
+    n = len(times_sorted)
+    median_t = times_sorted[n // 2]
+    p95_t = times_sorted[int(n * 0.95)]
+    
+    # Daily avg time trend (last 30 days)
+    trend = []
+    for day in sorted(daily_times.keys())[-30:]:
+        day_times = daily_times[day]
+        trend.append({"date": day, "avgTime": round(sum(day_times) / len(day_times), 1),
+                      "count": len(day_times)})
+    
+    return {
+        "avgTime": round(sum(times) / n, 1),
+        "medianTime": round(median_t, 1),
+        "p95Time": round(p95_t, 1),
+        "minTime": round(min(times), 1),
+        "maxTime": round(max(times), 1),
+        "avgApiCalls": round(sum(calls) / len(calls), 1),
+        "avgChars": round(sum(chars) / len(chars), 0),
+        "totalResponses": n,
+        "trend": trend,
+        "audioCount": audio_count,
+        "fallbackCount": fallback_count,
+        "warningCount": warning_count,
+    }
 
 
 def get_db():
@@ -32,15 +148,35 @@ def fmt_date_short(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
 
 
-MODEL_COLORS = [
-    '#F59E0B', '#00D4B4', '#E84848', '#39D966', '#A855F7',
-    '#EAB308', '#EC4899', '#F97316', '#06B6D4', '#84CC16',
-]
+MODEL_COLORS = ['#00D4B4', '#A855F7', '#39D966', '#E84848', '#FBBF24', '#06B6D4', '#EC4899', '#8B5CF6', '#34D399', '#22D3EE', '#FF6B6B', '#A78BFA']
 
-TOOL_COLORS = [
-    '#F59E0B', '#00D4B4', '#E84848', '#39D966', '#A855F7', '#EAB308',
-    '#EC4899', '#F97316', '#06B6D4', '#84CC16', '#FBBF24', '#D946EF',
-]
+TOOL_COLORS = ['#00D4B4', '#A855F7', '#39D966', '#E84848', '#FBBF24', '#06B6D4', '#EC4899', '#8B5CF6', '#34D399', '#22D3EE', '#FF6B6B', '#A78BFA']
+
+
+def load_overview_extras(conn):
+    """Avg session duration, active models (last 5 sessions)."""
+    c = conn.cursor()
+    # Active models in last 5 completed sessions
+    c.execute("""
+        SELECT DISTINCT model FROM sessions 
+        WHERE ended_at IS NOT NULL AND model IS NOT NULL
+        ORDER BY ended_at DESC LIMIT 5
+    """)
+    active_models = [r['model'] for r in c.fetchall()]
+    
+    # Avg session duration (completed sessions only)
+    c.execute("""
+        SELECT ROUND(AVG(ended_at - started_at), 0) as avg_duration,
+               COUNT(*) as completed_sessions
+        FROM sessions WHERE ended_at IS NOT NULL AND started_at IS NOT NULL
+    """)
+    r = dict(c.fetchone())
+    
+    return {
+        'activeModels': active_models,
+        'avgSessionDuration': r['avg_duration'] or 0,
+        'completedSessions': r['completed_sessions'] or 0,
+    }
 
 
 def load_totals(conn):
@@ -114,16 +250,32 @@ def load_tools(conn):
                ROUND(AVG(duration_ms), 0) as avg_duration
         FROM tool_usage GROUP BY tool_name ORDER BY count DESC
     """)
-    return [{'name': dict(r)['tool_name'], 'count': dict(r)['count'],
-             'success': dict(r)['success_rate'] / 100.0, 'durMs': dict(r)['avg_duration'],
-             'color': TOOL_COLORS[i % len(TOOL_COLORS)]}
-            for i, r in enumerate(c.fetchall())]
+    tools = []
+    for i, r in enumerate(c.fetchall()):
+        rd = dict(r)
+        tools.append({'name': rd['tool_name'], 'count': rd['count'],
+                      'success': rd['success_rate'] / 100.0, 'durMs': rd['avg_duration'],
+                      'color': TOOL_COLORS[i % len(TOOL_COLORS)]})
+
+    # Daily tool usage (last 30 days)
+    c.execute("""
+        SELECT date(timestamp, 'unixepoch') as day, tool_name, COUNT(*) as count
+        FROM tool_usage WHERE timestamp IS NOT NULL
+        GROUP BY day, tool_name ORDER BY day
+    """)
+    daily = {}
+    for r in c.fetchall():
+        rd = dict(r)
+        daily.setdefault(rd['day'], {})
+        daily[rd['day']][rd['tool_name']] = rd['count']
+
+    return {'tools': tools, 'daily': daily}
 
 
 def load_sources(conn):
     c = conn.cursor()
     c.execute("SELECT source, COUNT(*) as count FROM sessions WHERE source IS NOT NULL GROUP BY source ORDER BY count DESC")
-    source_colors = {'telegram': '#00D4B4', 'cli': '#F59E0B', 'api': '#A855F7'}
+    source_colors = {'telegram': '#00D4B4', 'cli': '#A855F7', 'api': '#06B6D4'}
     return [{'name': dict(r)['source'], 'count': dict(r)['count'],
              'color': source_colors.get(dict(r)['source'], TOOL_COLORS[i % len(TOOL_COLORS)])}
             for i, r in enumerate(c.fetchall())]
@@ -150,7 +302,6 @@ def load_errors(conn):
     c = conn.cursor()
     c.execute("""
         SELECT error_type, COUNT(*) as total,
-               SUM(CASE WHEN resolved = 0 THEN 1 ELSE 0 END) as unresolved,
                COUNT(DISTINCT source) as source_count,
                MIN(timestamp) as first_seen, MAX(timestamp) as last_seen
         FROM errors_log GROUP BY error_type ORDER BY total DESC LIMIT 20
@@ -158,13 +309,12 @@ def load_errors(conn):
     errors = []
     for row in c.fetchall():
         r = dict(row)
-        priority = round(r['total'] * (1 + r['unresolved'] / max(r['total'], 1)), 1)
+        priority = round(r['total'] * 1.5, 1)
         c2 = conn.cursor()
         c2.execute("SELECT DISTINCT source FROM errors_log WHERE error_type = ? AND source IS NOT NULL LIMIT 5", (r['error_type'],))
         src_list = [row2['source'] for row2 in c2.fetchall()]
         errors.append({
-            'pattern': r['error_type'], 'total': r['total'], 'unresolved': r['unresolved'],
-            'sources': ','.join(src_list) if src_list else 'system',
+            'pattern': r['error_type'], 'total': r['total'], 'sources': ','.join(src_list) if src_list else 'system',
             'firstSeen': fmt_date_short(r['first_seen']), 'lastSeen': fmt_date_short(r['last_seen']),
             'priority': priority,
         })
@@ -176,21 +326,81 @@ def load_error_trend(conn):
     c.execute("""
         SELECT date(timestamp, 'unixepoch') as day,
                CASE
-                   WHEN error_type LIKE '%rate%limit%' OR error_type LIKE '%timeout%' OR error_type LIKE '%auth%' THEN 'api'
-                   WHEN error_type LIKE '%tool%' OR error_type LIKE '%exec%' OR error_type LIKE '%shell%' THEN 'tool'
-                   WHEN error_type LIKE '%empty%' OR error_type LIKE '%nudge%' OR error_type LIKE '%interrupt%' THEN 'agent'
-                   WHEN error_type LIKE '%collector%' OR error_type LIKE '%db%' OR error_type LIKE '%lock%' THEN 'collector'
-                   ELSE 'api'
+                   WHEN error_type LIKE '%tool%' THEN 'tool_failure'
+                   WHEN error_type LIKE '%empty%' OR error_type LIKE '%nudge%' OR error_type LIKE '%model%' THEN 'model_behavior'
+                   WHEN error_type LIKE '%fallback%' OR error_type LIKE '%primary%' OR error_type LIKE '%rate%limit%' THEN 'provider'
+                   WHEN error_type LIKE '%interrupt%' THEN 'user_interrupt'
+                   ELSE 'other'
                END as category, COUNT(*) as count
         FROM errors_log WHERE timestamp IS NOT NULL
         GROUP BY day, category ORDER BY day
     """)
+    cats = ['tool_failure', 'model_behavior', 'provider', 'user_interrupt', 'other']
     day_data = {}
     for row in c.fetchall():
         r = dict(row)
-        day_data.setdefault(r['day'], {'api': 0, 'tool': 0, 'agent': 0, 'collector': 0})
+        day_data.setdefault(r['day'], {c: 0 for c in cats})
         day_data[r['day']][r['category']] = r['count']
-    return [{'date': d, **cats} for d, cats in sorted(day_data.items())]
+    return [{'date': d, **day_data[d]} for d in sorted(day_data.keys())]
+
+
+def load_sessions_analytics(conn):
+    """Per-session analytics: avg tokens, throughput, duration, tools, models used."""
+    c = conn.cursor()
+    
+    # Aggregate per-session averages
+    c.execute("""
+        SELECT 
+            COUNT(*) as total_sessions,
+            ROUND(AVG(ended_at - started_at), 0) as avg_duration_s,
+            ROUND(AVG(input_tokens + output_tokens + reasoning_tokens), 0) as avg_tokens,
+            ROUND(AVG(tool_call_count), 1) as avg_tools,
+            ROUND(AVG(api_call_count), 1) as avg_api_calls,
+            ROUND(AVG(message_count), 0) as avg_messages
+        FROM sessions 
+        WHERE ended_at IS NOT NULL AND started_at IS NOT NULL
+    """)
+    aggregates = dict(c.fetchone())
+    
+    # Token throughput per session (tokens/s)
+    c.execute("""
+        SELECT 
+            ROUND(AVG((input_tokens + output_tokens + reasoning_tokens) * 1.0 / 
+                 NULLIF(ended_at - started_at, 0)), 2) as avg_throughput
+        FROM sessions 
+        WHERE ended_at IS NOT NULL AND started_at IS NOT NULL 
+          AND (ended_at - started_at) > 0
+    """)
+    row = c.fetchone()
+    avg_throughput = row['avg_throughput'] or 0
+    
+    # Sessions per day (last 30 days)
+    c.execute("""
+        SELECT date(started_at, 'unixepoch') as day, COUNT(*) as count
+        FROM sessions WHERE started_at IS NOT NULL
+        GROUP BY day ORDER BY day DESC LIMIT 30
+    """)
+    sessions_per_day = [dict(r) for r in c.fetchall()][::-1]
+    
+    # Models in last 5 sessions
+    c.execute("""
+        SELECT model, COUNT(*) as count FROM sessions 
+        WHERE model IS NOT NULL
+        GROUP BY model ORDER BY COUNT(*) DESC
+    """)
+    model_usage = [dict(r) for r in c.fetchall()]
+    
+    return {
+        'totalSessions': aggregates['total_sessions'] or 0,
+        'avgDurationS': aggregates['avg_duration_s'] or 0,
+        'avgTokens': aggregates['avg_tokens'] or 0,
+        'avgTools': aggregates['avg_tools'] or 0,
+        'avgApiCalls': aggregates['avg_api_calls'] or 0,
+        'avgMessages': aggregates['avg_messages'] or 0,
+        'avgThroughput': avg_throughput,
+        'sessionsPerDay': sessions_per_day,
+        'modelUsage': model_usage,
+    }
 
 
 def load_heatmap(conn):
@@ -213,7 +423,7 @@ def load_heatmap(conn):
     model_set = model_set[:6]
     tool_set = tool_set[:8]
     lookup = {(r_['model'], r_['tool_name']): r_['failures'] / r_['total'] for r_ in rows}
-    heatmap_models = [m.split('/')[-1].split(':')[0][:12].upper() for m in model_set]
+    heatmap_models = [m.split('/')[-1].split(':')[0][:15].upper() for m in model_set]
     return {
         'models': heatmap_models,
         'tools': tool_set,
@@ -222,6 +432,11 @@ def load_heatmap(conn):
 
 
 def load_openrouter(conn):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    import os
+    tz_name = os.environ.get("DASHBOARD_TIMEZONE", "Europe/Madrid")
+    tz = ZoneInfo(tz_name)
     c = conn.cursor()
     c.execute("SELECT total_credits, total_usage, timestamp FROM account_snapshots ORDER BY timestamp DESC LIMIT 1")
     row = c.fetchone()
@@ -230,19 +445,114 @@ def load_openrouter(conn):
     r = dict(row)
     total_credits = r['total_credits']
     total_usage = r['total_usage']
-    now = time.time()
 
-    def usage_since(ts):
+    # Calendar-aligned periods in Europe/Madrid
+    now = datetime.now(tz)
+
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def spend_since(boundary_dt):
+        """Find the snapshot closest to (but before) the boundary and diff with current."""
+        ts = boundary_dt.timestamp()
         c2 = conn.cursor()
-        c2.execute("SELECT total_usage FROM account_snapshots WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1", (ts,))
+        c2.execute("""
+            SELECT total_usage FROM account_snapshots
+            WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1
+        """, (ts,))
         row2 = c2.fetchone()
-        if row2: return round(total_usage - row2['total_usage'], 4)
-        return round(total_usage * 0.1, 4)
+        if row2:
+            return round(max(total_usage - row2['total_usage'], 0), 2)
+        # No snapshot before boundary = all activity is within the period
+        return round(total_usage, 2)
 
     return {
         'totalCredits': round(total_credits, 2), 'totalUsage': round(total_usage, 2),
-        'today': usage_since(now - 86400), 'week': usage_since(now - 7 * 86400),
-        'month': usage_since(now - 30 * 86400), 'keyLimit': round(total_credits, 2),
+        'today': spend_since(day_start),
+        'week': spend_since(week_start),
+        'month': spend_since(month_start),
+        'keyLimit': round(total_credits, 2),
+    }
+
+
+def load_system_health(conn):
+    """Global system metrics: throughput, error rate, fallback rate, interruption rate."""
+    c = conn.cursor()
+    
+    # Token throughput global
+    c.execute("""
+        SELECT 
+            CASE WHEN SUM(ended_at - started_at) > 0 
+                THEN ROUND(SUM(input_tokens + output_tokens + reasoning_tokens) * 1.0 / 
+                     SUM(ended_at - started_at), 2)
+                ELSE 0 
+            END as global_throughput
+        FROM sessions 
+        WHERE ended_at IS NOT NULL AND started_at IS NOT NULL 
+          AND (ended_at - started_at) > 0
+    """)
+    global_tp = dict(c.fetchone())['global_throughput'] or 0
+    
+    # Error rate from errors_log (real system errors)
+    c.execute("""SELECT COUNT(*) FROM errors_log""")
+    total_errors = dict(c.fetchone())['COUNT(*)'] or 0
+    c.execute("""SELECT COUNT(*) FROM sessions WHERE ended_at IS NOT NULL""")
+    ended_sessions = dict(c.fetchone())['COUNT(*)'] or 1
+    err_rate = round(total_errors / ended_sessions, 1)  # errors per session
+    total_tc = ended_sessions  # reuse field name to avoid frontend break
+    failures = total_errors
+    
+    # Fallback rate (from errors_log)
+    c.execute("""
+        SELECT COUNT(*) as fallbacks FROM errors_log 
+        WHERE error_type LIKE '%fallback%' OR error_type LIKE '%primary%'
+    """)
+    fb = dict(c.fetchone())['fallbacks'] or 0
+    c.execute("SELECT COUNT(*) FROM sessions")
+    total_sessions = dict(c.fetchone())['COUNT(*)'] or 1
+    fb_rate = round(fb / total_sessions, 2)
+    
+    # Session interruption rate (user-initiated & system)
+    c.execute("""
+        SELECT 
+            COUNT(*) as total_sessions,
+            SUM(CASE WHEN end_reason = 'session_reset' OR end_reason IS NULL THEN 0 ELSE 1 END) as normal_end,
+            SUM(CASE WHEN end_reason = 'session_reset' THEN 1 ELSE 0 END) as resets,
+            SUM(CASE WHEN end_reason IS NULL THEN 1 ELSE 0 END) as active
+        FROM sessions
+    """)
+    sr = dict(c.fetchone())
+    ended = (sr['total_sessions'] or 0) - (sr['active'] or 0)
+    reset_rate = round((sr['resets'] or 0) / max(ended, 1) * 100, 1)
+    
+    # Error count trend (last 30 days, from errors_log)
+    c.execute("""
+        SELECT date(timestamp, 'unixepoch') as day, COUNT(*) as total
+        FROM errors_log WHERE timestamp IS NOT NULL
+        GROUP BY day ORDER BY day DESC LIMIT 30
+    """)
+    err_trend = []
+    for r in c.fetchall()[::-1]:
+        rd = dict(r)
+        err_trend.append({
+            'date': rd['day'],
+            'errorRate': round(rd['total'] / max(ended_sessions, 1), 1),
+            'totalCalls': rd['total'],
+            'failures': rd['total'],
+        })
+    
+    return {
+        'globalThroughput': global_tp,
+        'errorRate': err_rate,
+        'totalToolCalls': total_tc,
+        'failedToolCalls': failures,
+        'fallbackCount': fb,
+        'fallbackRate': fb_rate,
+        'totalSessions': sr['total_sessions'] or 0,
+        'sessionResetRate': reset_rate,
+        'activeSessions': sr['active'] or 0,
+        'errorRateTrend': err_trend,
     }
 
 
@@ -253,12 +563,112 @@ def load_collector(conn):
     if not row:
         return {'cronId': u'—', 'lastRun': u'—', 'lastStatus': 'unknown', 'sessionsAdded': 0, 'nextRun': u'—'}
     r = dict(row)
-    next_ts = (r['started_at'] or time.time()) + 3600
     return {
-        'cronId': 'a4dcdae4dd65', 'lastRun': fmt_date(r['ended_at'] or r['started_at']),
+        'cronId': 'on-demand', 'lastRun': fmt_date(r['ended_at'] or r['started_at']),
         'lastStatus': r['status'], 'sessionsAdded': r['sessions_added'] or 0,
-        'nextRun': fmt_date(next_ts),
+        'nextRun': 'on dashboard start',
     }
+
+def load_model_costs_real(conn):
+    """Real cost per model using openrouter_daily_usage + today estimate from sessions."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    import os
+    tz_name = os.environ.get("DASHBOARD_TIMEZONE", "Europe/Madrid")
+    tz = ZoneInfo(tz_name)
+    
+    c = conn.cursor()
+    
+    # 1) Get OR activity data (up to yesterday)
+    c.execute("""
+        SELECT model,
+               SUM(usage) as real_cost,
+               SUM(prompt_tokens) as input_tok,
+               SUM(completion_tokens) as output_tok,
+               SUM(requests) as reqs
+        FROM openrouter_daily_usage
+        GROUP BY model
+    """)
+    or_costs = {}
+    for r in c.fetchall():
+        or_costs[r['model']] = {
+            'real_cost': r['real_cost'],
+            'input_tok': r['input_tok'],
+            'output_tok': r['output_tok'],
+            'reqs': r['reqs'],
+        }
+    
+    # 2) Get today's OR snapshot diff for total remaining
+    c.execute("SELECT total_usage FROM account_snapshots ORDER BY timestamp DESC LIMIT 1")
+    latest = c.fetchone()
+    total_usage = latest['total_usage'] if latest else 0
+    or_total = sum(v['real_cost'] for v in or_costs.values())
+    
+    # 3) Estimate today's costs per model using model_prices + today's session tokens
+    today_start = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    c.execute("""
+        SELECT s.model,
+               SUM(s.input_tokens) as in_tok,
+               SUM(s.output_tokens) as out_tok,
+               SUM(s.cache_read_tokens) as cache_tok
+        FROM sessions s
+        WHERE s.started_at >= ? AND s.model IS NOT NULL
+        GROUP BY s.model
+    """, (today_start,))
+    today_sessions = {
+        r['model']: {
+            'in_tok': r['in_tok'],
+            'out_tok': r['out_tok'],
+            'cache_tok': r['cache_tok'],
+        }
+        for r in c.fetchall()
+    }
+    
+    # Get model prices
+    c.execute("SELECT model_id, input_price, output_price, cache_read_price FROM model_prices")
+    prices = {}
+    for r in c.fetchall():
+        prices[r['model_id']] = r
+    
+    today_costs = {}
+    for model, r in today_sessions.items():
+        p = prices.get(model)
+        if p:
+            cost = (r['in_tok'] * (p['input_price'] or 0) +
+                    r['out_tok'] * (p['output_price'] or 0) +
+                    r['cache_tok'] * (p['cache_read_price'] or 0))
+            today_costs[model] = round(cost, 4)
+        else:
+            today_costs[model] = 0.0
+    
+    # 4) Merge: OR data + today estimates, scale to match snapshot total
+    # Get all models from sessions
+    c.execute("SELECT DISTINCT model FROM sessions WHERE model IS NOT NULL ORDER BY model")
+    all_models = [r['model'] for r in c.fetchall()]
+    
+    results = []
+    for model in all_models:
+        or_cost = or_costs.get(model, {}).get('real_cost', 0) or 0
+        today_cost = today_costs.get(model, 0) or 0
+        total_cost = or_cost + today_cost
+        
+        in_tok = (or_costs.get(model, {}).get('input_tok', 0) or 0) + (today_sessions.get(model, {}).get('in_tok', 0) or 0)
+        out_tok = (or_costs.get(model, {}).get('output_tok', 0) or 0) + (today_sessions.get(model, {}).get('out_tok', 0) or 0)
+        cache_tok = (today_sessions.get(model, {}).get('cache_tok', 0) or 0)
+        reqs = (or_costs.get(model, {}).get('reqs', 0) or 0)
+        
+        results.append({
+            'model': model,
+            'input_tokens': in_tok,
+            'output_tokens': out_tok,
+            'cache_read_tokens': cache_tok,
+            'reasoning_tokens': 0,
+            'session_count': reqs,
+            'real_cost': round(total_cost, 4),
+        })
+    
+    return results
+
 
 
 @app.route('/api/all')
@@ -269,15 +679,22 @@ def api_all():
         totals = load_totals(conn)
         today = datetime.now().date()
         days_since = max(totals.get('daysActive', 14), 7)
+        tools_data = load_tools(conn)
         return jsonify({
             'models': models,
             'days': [(today - timedelta(days=i)).isoformat() for i in range(days_since - 1, -1, -1)],
             'tokensPerDay': load_tokens_per_day(conn, models),
-            'tools': load_tools(conn), 'toolColors': TOOL_COLORS,
+            'tools': tools_data['tools'], 'toolDaily': tools_data['daily'],
+            'toolColors': TOOL_COLORS,
             'sources': load_sources(conn), 'recentSessions': load_recent_sessions(conn, 10),
             'errors': load_errors(conn), 'errorTrend': load_error_trend(conn),
             'heatmap': load_heatmap(conn), 'openRouter': load_openrouter(conn),
             'collector': load_collector(conn), 'totals': totals,
+            'overviewExtras': load_overview_extras(conn),
+            'sessionMetrics': load_sessions_analytics(conn),
+            'systemHealth': load_system_health(conn),
+            'modelCosts': load_model_costs_real(conn),
+            'agentLog': load_agent_log_metrics(),
         })
     finally:
         conn.close()
@@ -288,11 +705,35 @@ def index():
     return send_from_directory(app.static_folder, 'index.html')
 
 
+
+@app.route('/api/system')
+def api_system():
+    conn = get_db()
+    try:
+        return jsonify({
+            'health': load_system_health(conn),
+            'heatmap': load_heatmap(conn),
+            'agentLog': load_agent_log_metrics(),
+            'collector': load_collector(conn),
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/api/sessions')
+def api_sessions():
+    conn = get_db()
+    try:
+        return jsonify(load_sessions_analytics(conn))
+    finally:
+        conn.close()
+
 @app.route('/<path:path>')
 def static_files(path):
     return send_from_directory(app.static_folder, path)
 
 
 if __name__ == '__main__':
-    print(f"🚀 Hermes Dashboard API + React on http://localhost:8502")
-    app.run(host='0.0.0.0', port=8502, debug=True)
+    run_collector()
+    print(f"🚀 Hermes Dashboard API + React on http://localhost:8590")
+    app.run(host='0.0.0.0', port=8590, debug=True)

@@ -5,12 +5,13 @@ const { useState, useMemo, useEffect } = React;
 // PANEL (corner-bracket card)
 // ============================================
 function Panel({ label, letter = 'A', meta, children, gold, className = '', headerRight }) {
+  const [hovered, setHovered] = React.useState(false);
   return (
-    <div className={`cp ${gold ? 'gold' : ''} ${className}`}>
+    <div className={`cp ${gold ? 'gold' : ''} ${className}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       {label && (
         <div className="cp-header">
           <div className="cp-label">
-            <span className="letter-box">{letter}</span>
+            <span className="letter-box" style={hovered ? {borderColor: 'var(--amber-bright)', boxShadow: '0 0 8px var(--amber-dim)'} : {}}>{letter}</span>
             <span>{label}</span>
           </div>
           {headerRight}
@@ -33,7 +34,7 @@ function StatCard({ letter, eyebrow, value, unit, delta, deltaDir, color = 'ambe
         {letter && <span className="stat-letter">{letter}</span>}
       </div>
       <div>
-        <span className={`stat-num ${color}`}>{value}</span>
+        <span className={`stat-num ${color}`} style={{textShadow: color === 'amber' ? '0 0 12px var(--amber-dim)' : color === 'gold' ? '0 0 12px var(--gold-dim)' : 'none'}}>{value}</span>
         {unit && <span className="stat-unit">{unit}</span>}
       </div>
       {delta && <div className={`stat-delta ${deltaDir || ''}`}>{delta}</div>}
@@ -48,7 +49,7 @@ function StatCard({ letter, eyebrow, value, unit, delta, deltaDir, color = 'ambe
 // STACKED BAR CHART (HUD pixel style)
 // rows: [{ x: label, series: [{ key, value, color }] }]
 // ============================================
-function StackedBar({ data, height = 240, yTickCount = 4, valueFormat = (v) => v.toLocaleString() }) {
+function StackedBar({ data, height = 300, yTickCount = 4, valueFormat = (v) => v.toLocaleString() }) {
   const totals = data.map(r => r.series.reduce((s, x) => s + x.value, 0));
   const max = Math.max(...totals, 1);
   // Round max up to nice number
@@ -110,13 +111,27 @@ function StackedBar({ data, height = 240, yTickCount = 4, valueFormat = (v) => v
 // DONUT CHART (SVG)
 // data: [{ label, value, color }]
 // ============================================
-function Donut({ data, size = 200, thickness = 26, centerLabel, centerValue }) {
+function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const r = size / 2 - thickness / 2 - 2;
   const c = 2 * Math.PI * r;
   let offset = 0;
+  // Build segments with their angles for label positioning
+  let cumAngle = 0;
+  const segments = data.map((d) => {
+    const angle = (d.value / total) * 360;
+    const midAngle = cumAngle + angle / 2;
+    const rad = (midAngle - 90) * Math.PI / 180;
+    const labelR = r + thickness / 2 + 14;
+    const lx = size/2 + labelR * Math.cos(rad);
+    const ly = size/2 + labelR * Math.sin(rad);
+    const seg = { d, angle, midAngle, midRad: (midAngle - 90) * Math.PI / 180, lx, ly };
+    cumAngle += angle;
+    return seg;
+  }).filter(s => s.angle > 2);  // skip tiny segments for labels
+
   return (
-    <svg className="donut-svg" viewBox={`0 0 ${size} ${size}`}>
+    <svg className="donut-svg" viewBox={`-30 -30 ${size+60} ${size+60}`} width={`${size+60}`} height={`${size+60}`}>
       <g transform={`translate(${size/2}, ${size/2}) rotate(-90)`}>
         <circle r={r} fill="none" stroke="rgba(245,158,11,0.06)" strokeWidth={thickness} />
         {data.map((d, i) => {
@@ -136,8 +151,24 @@ function Donut({ data, size = 200, thickness = 26, centerLabel, centerValue }) {
           return seg;
         })}
       </g>
+      {/* Inline percentage labels */}
+      {segments.map((s, i) => (
+        <text
+          key={i}
+          x={s.lx}
+          y={s.ly}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize="10"
+          fontWeight="600"
+          fill={s.d.color}
+          fontFamily="var(--font-m)"
+        >
+          {(s.d.value / total * 100).toFixed(1)}%
+        </text>
+      ))}
       {centerValue && (
-        <text x={size/2} y={size/2 - 2} className="donut-center" textAnchor="middle" fontSize="20" fill="#A8FF78">{centerValue}</text>
+        <text x={size/2} y={size/2 - 2} className="donut-center" textAnchor="middle" fontSize="22" fill="#A8FF78">{centerValue}</text>
       )}
       {centerLabel && (
         <text x={size/2} y={size/2 + 18} className="donut-center" textAnchor="middle" fontSize="9" fill="#9A8870" letterSpacing="0.2em">{centerLabel}</text>
@@ -150,18 +181,16 @@ function DonutWithLegend({ data, centerLabel, centerValue, valueFormat = (v) => 
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   return (
     <div className="donut-wrap">
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <Donut data={data} centerLabel={centerLabel} centerValue={centerValue} />
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+        <Donut data={data} centerLabel={centerLabel} centerValue={centerValue} size={220} thickness={18} />
       </div>
-      <div className="donut-list">
+      <div className="donut-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '6px 16px' }}>
         {data.map((d, i) => {
-          const pct = (d.value / total) * 100;
           return (
-            <div key={i} className="donut-row">
-              <span className="legend-swatch" style={{ background: d.color }} />
-              <span className="name">{d.label}</span>
-              <span className="val">{valueFormat(d.value)}</span>
-              <span className="pct">{pct.toFixed(1)}%</span>
+            <div key={i} className="donut-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
+              <span style={{ flex: 1, fontFamily: 'var(--font-m)', color: 'var(--text)', letterSpacing: '0.03em' }}>{d.label}</span>
+              <span style={{ fontFamily: 'var(--font-m)', color: 'var(--green)' }}>{valueFormat(d.value)}</span>
             </div>
           );
         })}

@@ -8,12 +8,20 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const NAV = [
-  { id: 'overview', n: '01', badge: '14D' },
-  { id: 'tools',    n: '02', badge: '12' },
-  { id: 'tokens',   n: '03', badge: '65M' },
-  { id: 'errors',   n: '04', badge: '198' },
-  { id: 'system',   n: '05', badge: 'OK' },
+  { id: 'overview', n: '01' },
+  { id: 'tools',    n: '02' },
+  { id: 'tokens',   n: '03' },
+  { id: 'errors',   n: '04' },
+  { id: 'sessions', n: '05' },
+  { id: 'system',   n: '06' },
 ];
+
+function formatCompact(value) {
+  if (!value) return '0';
+  if (value >= 1000000) return `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}K`;
+  return String(value);
+}
 
 function normalizeData(raw) {
   const t = raw.totals || {};
@@ -45,6 +53,12 @@ function normalizeData(raw) {
     heatmapTools: hm.tools || [],
     openRouter: raw.openRouter || {},
     collector: raw.collector || {},
+    sessionMetrics: raw.sessionMetrics || {},
+    systemHealth: raw.systemHealth || {},
+    modelCosts: raw.modelCosts || [],
+    agentLog: raw.agentLog || {},
+    overviewExtras: raw.overviewExtras || {},
+    toolDaily: raw.toolDaily || {},
     totals,
   };
 }
@@ -52,7 +66,7 @@ function normalizeData(raw) {
 function LoadingScreen() {
   return React.createElement('div', { className: 'app' },
     React.createElement('div', { className: 'loading-screen' },
-      React.createElement('div', { className: 'loading-diamond' }),
+      React.createElement('canvas', { id: 'loading-logo', className: 'loading-logo' }),
       React.createElement('div', { className: 'loading-text' }, 'HERMES'),
       React.createElement('div', { className: 'loading-sub' }, 'INITIALIZING TELEMETRY · FETCHING DATA')
     )
@@ -62,7 +76,7 @@ function LoadingScreen() {
 function ErrorScreen({ message }) {
   return React.createElement('div', { className: 'app' },
     React.createElement('div', { className: 'loading-screen' },
-      React.createElement('div', { className: 'loading-diamond', style: { borderColor: '#E84848' } }),
+      React.createElement('canvas', { id: 'error-logo', className: 'loading-logo' }),
       React.createElement('div', { className: 'loading-text', style: { color: '#E84848' } }, 'CONNECTION ERROR'),
       React.createElement('div', { className: 'loading-sub' }, message || 'Could not reach Hermes API')
     )
@@ -72,10 +86,19 @@ function ErrorScreen({ message }) {
 function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
   const D = HERMES_DATA;
   const orPct = D.openRouter.totalCredits > 0 ? (D.openRouter.totalUsage / D.openRouter.totalCredits) * 100 : 0;
+  const openRouterDelta = (D.openRouter.totalCredits || 0) - (D.openRouter.totalUsage || 0);
+  const navBadges = {
+    overview: `${D.totals?.daysActive || 0}D`,
+    tools: String(D.tools?.length || 0),
+    tokens: formatCompact(D.totals?.tokens || 0),
+    errors: String(D.errors?.length || 0),
+    sessions: String(D.totals?.sessions || 0),
+    system: (D.systemHealth?.status || 'OK').toUpperCase(),
+  };
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-diamond" />
+        <canvas id="side-logo" className="sidebar-logo" />
         <div>
           <div className="sidebar-brand-text">HERMES</div>
           <div className="sidebar-brand-sub">ANALYTICS · v2.6</div>
@@ -86,7 +109,7 @@ function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
         <button key={n.id} className={`nav-item ${active === n.id ? 'active' : ''}`} onClick={() => onSelect(n.id)}>
           <span className="nav-num">{n.n}</span>
           <span className="nav-label">{t.nav[n.id]}</span>
-          <span className="nav-badge">{n.badge}</span>
+          <span className="nav-badge">{navBadges[n.id] || '—'}</span>
         </button>
       ))}
       <div className="sidebar-divider" />
@@ -103,7 +126,7 @@ function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
         <div className="sb-row"><span className="sb-row-key">USED</span><span className="sb-row-val amber">${(D.openRouter.totalUsage || 0).toFixed(2)}</span></div>
         <div className="sb-row"><span className="sb-row-key">LIMIT</span><span className="sb-row-val">${(D.openRouter.totalCredits || 0).toFixed(2)}</span></div>
         <div className="sb-progress"><div className="sb-progress-fill" style={{ width: Math.min(orPct, 100) + '%' }} /></div>
-        <div className="sb-row" style={{ marginTop: 2 }}><span className="sb-row-key">{orPct.toFixed(1)}%</span><span className="sb-row-key">${Math.max(0, (D.openRouter.totalCredits - D.openRouter.totalUsage)).toFixed(2)} LEFT</span></div>
+        <div className="sb-row" style={{ marginTop: 2 }}><span className="sb-row-key">{orPct.toFixed(1)}%</span><span className="sb-row-key">{openRouterDelta >= 0 ? `$${openRouterDelta.toFixed(2)} LEFT` : `$${Math.abs(openRouterDelta).toFixed(2)} OVER`}</span></div>
       </div>
       <div className="sb-card">
         <div className="sb-card-label"><span className="sb-card-letter">C</span><span>USAGE WINDOWS</span></div>
@@ -135,7 +158,7 @@ function UtilityBar({ active, t }) {
       <div className="utility-bar-right">
         <span>{String(navIdx + 1).padStart(2, '0')} / {String(NAV.length).padStart(2, '0')}  {t.misc.page}</span>
         <span>{new Date().toLocaleString()}</span>
-        <span>ランダム 00{D.totals.sessions}</span>
+        <span>SESSIONS 00{D.totals.sessions}</span>
       </div>
     </div>
   );
@@ -152,6 +175,7 @@ function HermesLEDCanvas() {
 }
 
 function PageHeader({ active, t }) {
+  const D = HERMES_DATA;
   return (
     <div className="page-header">
       <div className="page-header-logo"><HermesLEDCanvas /></div>
@@ -159,11 +183,11 @@ function PageHeader({ active, t }) {
         <div className="page-eyebrow">{t.section_eyebrow[active]}</div>
         <div className="page-title">{t.nav[active]}</div>
         <div className="page-sub">
-          {active === 'overview' && 'PANEL DE CONTROL \u00b7 TELEMETR\u00cdA UNIFICADA'}
-          {active === 'tools' && '12 HERRAMIENTAS \u00b7 2,875 LLAMADAS \u00b7 14 D\u00cdAS'}
-          {active === 'tokens' && '6 MODELOS \u00b7 65M TOKENS \u00b7 BENCHMARKED'}
-          {active === 'errors' && '198 INCIDENCIAS \u00b7 35 PENDIENTES \u00b7 CLUSTERED'}
-          {active === 'system' && 'UPTIME 99.84% \u00b7 ERROR RATE 3.2% \u00b7 LATENCY 187MS'}
+          {active === 'overview' && `${D.totals?.daysActive || 0} DÍAS ACTIVOS · ${D.totals?.models || 0} MODELOS · ${formatCompact(D.totals?.tokens || 0)} TOKENS`}
+          {active === 'tools' && `${D.tools?.length || 0} HERRAMIENTAS · ${(D.totals?.toolCalls || 0).toLocaleString('es-ES')} LLAMADAS · ${D.totals?.daysActive || 0} DÍAS`}
+          {active === 'tokens' && `${D.totals?.models || 0} MODELOS · ${formatCompact(D.totals?.tokens || 0)} TOKENS · ${formatCompact(D.totals?.cacheReadTokens || 0)} CACHE`}
+          {active === 'errors' && `${D.errors?.length || 0} INCIDENCIAS · ${(D.errorTrend || []).length} DÍAS CON TRAZA · LOG-BASED`}
+          {active === 'system' && `GLOBAL THROUGHPUT ${HERMES_DATA?.systemHealth?.globalThroughput || '—'} · ERRORS ${HERMES_DATA?.systemHealth?.failedToolCalls || 0} · FALLBACKS ${HERMES_DATA?.systemHealth?.fallbackCount || 0}`}
         </div>
       </div>
     </div>
@@ -220,6 +244,7 @@ function App() {
           {active === 'tools'    && <SectionTools t={t} />}
           {active === 'tokens'   && <SectionTokens t={t} />}
           {active === 'errors'   && <SectionErrors t={t} />}
+          {active === 'sessions' && <SectionSessions t={t} />}
           {active === 'system'   && <SectionSystem t={t} />}
         </div>
       </main>
@@ -233,3 +258,34 @@ function App() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
+
+
+
+// Mount Caduceus logos with MutationObserver
+(function() {
+  var observer = new MutationObserver(function() {
+    var els = ['loading-logo', 'error-logo', 'side-logo'];
+    var allFound = true;
+    els.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && window.mountHermesLogo && el.width === 0) {
+        try { window.mountHermesLogo(el); } catch(e) {}
+      }
+      if (!document.getElementById(id)) allFound = false;
+    });
+    if (allFound) observer.disconnect();
+  });
+  observer.observe(document.body || document.documentElement, {
+    childList: true, subtree: true
+  });
+  // Also try immediately
+  setTimeout(function() {
+    var els = ['loading-logo', 'error-logo', 'side-logo'];
+    els.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && window.mountHermesLogo) {
+        try { window.mountHermesLogo(el); } catch(e) {}
+      }
+    });
+  }, 500);
+})();

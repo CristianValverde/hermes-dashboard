@@ -400,6 +400,25 @@ def migrate_db(conn):
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tool_usage_tool ON tool_usage(tool_name)")
 
+    # Migration 6: Create openrouter_daily_usage table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS openrouter_daily_usage (
+            date                TEXT NOT NULL,
+            model               TEXT NOT NULL,
+            endpoint_id         TEXT,
+            prompt_tokens       INTEGER DEFAULT 0,
+            completion_tokens   INTEGER DEFAULT 0,
+            reasoning_tokens    INTEGER DEFAULT 0,
+            requests            INTEGER DEFAULT 0,
+            usage               REAL DEFAULT 0.0,
+            provider_name       TEXT,
+            model_permaslug     TEXT,
+            byok_usage_inference REAL DEFAULT 0.0,
+            collected_at        REAL NOT NULL,
+            PRIMARY KEY (date, model, endpoint_id)
+        )
+    """)
+
     conn.commit()
 
     print("[migrate_db] Schema migrations applied (performance tables ready)")
@@ -1636,7 +1655,7 @@ def collect_openrouter_activity(conn):
 
         import datetime as dt
 
-        dt_obj = dt.datetime.strptime(latest_date, '%Y-%m-%d')
+        dt_obj = dt.datetime.strptime(latest_date[:10], '%Y-%m-%d')
 
         timestamp = dt_obj.timestamp()
 
