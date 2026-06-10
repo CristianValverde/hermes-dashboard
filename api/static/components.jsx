@@ -49,7 +49,7 @@ function StatCard({ letter, eyebrow, value, unit, delta, deltaDir, color = 'ambe
 // STACKED BAR CHART (HUD pixel style)
 // rows: [{ x: label, series: [{ key, value, color }] }]
 // ============================================
-function StackedBar({ data, height = 300, yTickCount = 4, valueFormat = (v) => v.toLocaleString() }) {
+function StackedBar({ data, height = 300, yTickCount = 4, valueFormat = (v) => v.toLocaleString(), tooltipFormat }) {
   const totals = data.map(r => r.series.reduce((s, x) => s + x.value, 0));
   const max = Math.max(...totals, 1);
   // Round max up to nice number
@@ -71,20 +71,31 @@ function StackedBar({ data, height = 300, yTickCount = 4, valueFormat = (v) => v
 
   return (
     <div className="stack-bar">
-      <div className="stack-bar-wrap" style={{ height }}>
+      <div className="stack-bar-wrap" style={{ height, minWidth: 0 }}>
         <div className="stack-bar-yaxis">
           {yTicks.map((t, i) => <span key={i}>{valueFormat(t)}</span>)}
         </div>
-        <div className="stack-bar-chart" style={{ height }}>
+        <div className="stack-bar-chart" style={{ height, minWidth: 0 }}>
           {data.map((row, ri) => {
             const total = totals[ri];
             const pct = (total / niceMax) * 100;
+            const rowTooltip = tooltipFormat
+              ? tooltipFormat({ row, total, valueFormat })
+              : `${row.x} · ${valueFormat(total)}`;
             return (
-              <div key={ri} className="stack-bar-col" title={`${row.x} · ${valueFormat(total)}`}>
+              <div
+                key={ri}
+                className={`stack-bar-col ${tooltipFormat ? 'tooltip-anchor' : ''}`}
+                title={rowTooltip}
+                data-tooltip={tooltipFormat ? rowTooltip : undefined}
+                aria-label={rowTooltip}
+                tabIndex={tooltipFormat ? 0 : undefined}
+              >
                 {row.series.map((seg, si) => (
                   <div
                     key={seg.key}
                     className="stack-bar-seg"
+                    title={tooltipFormat ? `${row.x} · ${seg.label || seg.key} | ${valueFormat(seg.value)}` : undefined}
                     style={{
                       height: `${(seg.value / niceMax) * 100}%`,
                       background: seg.color,
@@ -111,7 +122,7 @@ function StackedBar({ data, height = 300, yTickCount = 4, valueFormat = (v) => v
 // DONUT CHART (SVG)
 // data: [{ label, value, color }]
 // ============================================
-function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
+function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue, tooltipFormat }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   const r = size / 2 - thickness / 2 - 2;
   const c = 2 * Math.PI * r;
@@ -136,6 +147,7 @@ function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
         <circle r={r} fill="none" stroke="rgba(245,158,11,0.06)" strokeWidth={thickness} />
         {data.map((d, i) => {
           const len = (d.value / total) * c;
+          const label = tooltipFormat ? tooltipFormat(d, total) : `${d.label}: ${d.value.toLocaleString()}`;
           const seg = (
             <circle
               key={i}
@@ -145,7 +157,9 @@ function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
               strokeWidth={thickness}
               strokeDasharray={`${len} ${c - len}`}
               strokeDashoffset={-offset}
-            />
+            >
+              <title>{label}</title>
+            </circle>
           );
           offset += len;
           return seg;
@@ -177,20 +191,31 @@ function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
   );
 }
 
-function DonutWithLegend({ data, centerLabel, centerValue, valueFormat = (v) => v.toLocaleString() }) {
+function DonutWithLegend({ data, centerLabel, centerValue, valueFormat = (v) => v.toLocaleString(), showLegendValues = true, tooltipFormat, compact = false }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const donutSize = compact ? 184 : 220;
+  const legendColumns = compact ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fill, minmax(180px, 1fr))';
   return (
-    <div className="donut-wrap">
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-        <Donut data={data} centerLabel={centerLabel} centerValue={centerValue} size={220} thickness={18} />
+    <div className={`donut-wrap ${compact ? 'compact' : ''}`}>
+      <div className="donut-chart-shell">
+        <Donut data={data} centerLabel={centerLabel} centerValue={centerValue} size={donutSize} thickness={compact ? 16 : 18} tooltipFormat={tooltipFormat} />
       </div>
-      <div className="donut-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '6px 16px' }}>
+      <div className="donut-list" style={{ display: 'grid', gridTemplateColumns: legendColumns, gap: compact ? '4px 10px' : '6px 16px' }}>
         {data.map((d, i) => {
+          const rowTooltip = tooltipFormat ? tooltipFormat(d, total) : `${d.label}: ${valueFormat(d.value)}`;
           return (
-            <div key={i} className="donut-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+            <div
+              key={i}
+              className={`donut-row ${tooltipFormat ? 'tooltip-anchor' : ''}`}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, minWidth: 0 }}
+              title={rowTooltip}
+              data-tooltip={tooltipFormat ? rowTooltip : undefined}
+              aria-label={rowTooltip}
+              tabIndex={tooltipFormat ? 0 : undefined}
+            >
               <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
-              <span style={{ flex: 1, fontFamily: 'var(--font-m)', color: 'var(--text)', letterSpacing: '0.03em' }}>{d.label}</span>
-              <span style={{ fontFamily: 'var(--font-m)', color: 'var(--green)' }}>{valueFormat(d.value)}</span>
+              <span className="donut-row-label" style={{ flex: 1, fontFamily: 'var(--font-m)', color: 'var(--text)', letterSpacing: '0.03em' }}>{d.label}</span>
+              {showLegendValues && <span style={{ fontFamily: 'var(--font-m)', color: 'var(--green)' }}>{valueFormat(d.value)}</span>}
             </div>
           );
         })}
@@ -259,16 +284,26 @@ function LineChart({ series, xLabels, height = 240, valueFormat = (v) => v.toStr
 // ============================================
 // LEGEND
 // ============================================
-function Legend({ items, withValues, valueFormat = (v) => v.toLocaleString() }) {
+function Legend({ items, withValues, valueFormat = (v) => v.toLocaleString(), tooltipFormat }) {
   return (
     <div className="legend">
-      {items.map((it, i) => (
-        <div key={i} className="legend-item">
-          <span className="legend-swatch" style={{ background: it.color }} />
-          <span>{it.label}</span>
-          {withValues && <span className="legend-val">{valueFormat(it.value)}</span>}
-        </div>
-      ))}
+      {items.map((it, i) => {
+        const itemTooltip = tooltipFormat ? tooltipFormat(it, i) : undefined;
+        return (
+          <div
+            key={i}
+            className={`legend-item ${tooltipFormat ? 'tooltip-anchor' : ''}`}
+            title={itemTooltip}
+            data-tooltip={itemTooltip}
+            aria-label={itemTooltip || it.label}
+            tabIndex={tooltipFormat ? 0 : undefined}
+          >
+            <span className="legend-swatch" style={{ background: it.color }} />
+            <span>{it.label}</span>
+            {withValues && <span className="legend-val">{valueFormat(it.value)}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

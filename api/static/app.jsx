@@ -16,6 +16,12 @@ const NAV = [
   { id: 'system',   n: '06' },
 ];
 
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = (target.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
 function formatCompact(value) {
   if (!value) return '0';
   if (value >= 1000000) return `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}M`;
@@ -40,9 +46,12 @@ function normalizeData(raw) {
   const hm = raw.heatmap || {};
   return {
     models: raw.models || [],
+    economicBreakdown: raw.economicBreakdown || [],
+    economicProviderUsage: raw.economicProviderUsage || [],
     days: raw.days || [],
     tokensPerDay: raw.tokensPerDay || [],
     tools: raw.tools || [],
+    toolTokenUsage: raw.toolTokenUsage || [],
     toolColors: raw.toolColors || [],
     sources: raw.sources || [],
     recentSessions: raw.recentSessions || [],
@@ -85,8 +94,6 @@ function ErrorScreen({ message }) {
 
 function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
   const D = HERMES_DATA;
-  const orPct = D.openRouter.totalCredits > 0 ? (D.openRouter.totalUsage / D.openRouter.totalCredits) * 100 : 0;
-  const openRouterDelta = (D.openRouter.totalCredits || 0) - (D.openRouter.totalUsage || 0);
   const navBadges = {
     overview: `${D.totals?.daysActive || 0}D`,
     tools: String(D.tools?.length || 0),
@@ -99,14 +106,19 @@ function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <canvas id="side-logo" className="sidebar-logo" />
-        <div>
+        <div className="sidebar-brand-copy">
           <div className="sidebar-brand-text">HERMES</div>
           <div className="sidebar-brand-sub">ANALYTICS · v2.6</div>
         </div>
       </div>
       <div className="sidebar-section-label">NAVIGATION</div>
       {NAV.map(n => (
-        <button key={n.id} className={`nav-item ${active === n.id ? 'active' : ''}`} onClick={() => onSelect(n.id)}>
+        <button
+          key={n.id}
+          className={`nav-item ${active === n.id ? 'active' : ''}`}
+          onClick={() => onSelect(n.id)}
+          title={`${t.nav[n.id]} · ${navBadges[n.id] || '—'}`}
+        >
           <span className="nav-num">{n.n}</span>
           <span className="nav-label">{t.nav[n.id]}</span>
           <span className="nav-badge">{navBadges[n.id] || '—'}</span>
@@ -122,17 +134,16 @@ function Sidebar({ active, onSelect, t, tweaks, setTweak }) {
         <div className="sb-row"><span className="sb-row-key">NEXT</span><span className="sb-row-val code">{D.collector.nextRun ? D.collector.nextRun.split(' ')[1] : '\u2014'}</span></div>
       </div>
       <div className="sb-card">
-        <div className="sb-card-label"><span className="sb-card-letter">B</span><span>OPENROUTER · CREDITS</span></div>
-        <div className="sb-row"><span className="sb-row-key">USED</span><span className="sb-row-val amber">${(D.openRouter.totalUsage || 0).toFixed(2)}</span></div>
-        <div className="sb-row"><span className="sb-row-key">LIMIT</span><span className="sb-row-val">${(D.openRouter.totalCredits || 0).toFixed(2)}</span></div>
-        <div className="sb-progress"><div className="sb-progress-fill" style={{ width: Math.min(orPct, 100) + '%' }} /></div>
-        <div className="sb-row" style={{ marginTop: 2 }}><span className="sb-row-key">{orPct.toFixed(1)}%</span><span className="sb-row-key">{openRouterDelta >= 0 ? `$${openRouterDelta.toFixed(2)} LEFT` : `$${Math.abs(openRouterDelta).toFixed(2)} OVER`}</span></div>
+        <div className="sb-card-label"><span className="sb-card-letter">B</span><span>SESSION · FOOTPRINT</span></div>
+        <div className="sb-row"><span className="sb-row-key">SES</span><span className="sb-row-val code">{D.totals.sessions || 0}</span></div>
+        <div className="sb-row"><span className="sb-row-key">TOKENS</span><span className="sb-row-val amber">{formatCompact(D.totals.tokens || 0)}</span></div>
+        <div className="sb-row"><span className="sb-row-key">CALLS</span><span className="sb-row-val">{(D.totals.toolCalls || 0).toLocaleString('es-ES')}</span></div>
       </div>
       <div className="sb-card">
-        <div className="sb-card-label"><span className="sb-card-letter">C</span><span>USAGE WINDOWS</span></div>
-        <div className="sb-row"><span className="sb-row-key">{t.misc.today}</span><span className="sb-row-val code">${(D.openRouter.today || 0).toFixed(2)}</span></div>
-        <div className="sb-row"><span className="sb-row-key">{t.misc.week}</span><span className="sb-row-val code">${(D.openRouter.week || 0).toFixed(2)}</span></div>
-        <div className="sb-row"><span className="sb-row-key">{t.misc.month}</span><span className="sb-row-val code">${(D.openRouter.month || 0).toFixed(2)}</span></div>
+        <div className="sb-card-label"><span className="sb-card-letter">C</span><span>MODEL · COVERAGE</span></div>
+        <div className="sb-row"><span className="sb-row-key">MODELS</span><span className="sb-row-val amber">{D.totals.models || 0}</span></div>
+        <div className="sb-row"><span className="sb-row-key">PROVIDERS</span><span className="sb-row-val">{D.economicProviderUsage?.length || 0}</span></div>
+        <div className="sb-row"><span className="sb-row-key">ACTIVE</span><span className="sb-row-val code">{D.totals.daysActive || 0}D</span></div>
       </div>
       <div className="sidebar-footer">
         <span>BUILD 26.05.14</span>
@@ -183,7 +194,7 @@ function PageHeader({ active, t }) {
         <div className="page-eyebrow">{t.section_eyebrow[active]}</div>
         <div className="page-title">{t.nav[active]}</div>
         <div className="page-sub">
-          {active === 'overview' && `${D.totals?.daysActive || 0} DÍAS ACTIVOS · ${D.totals?.models || 0} MODELOS · ${formatCompact(D.totals?.tokens || 0)} TOKENS`}
+          {active === 'overview' && t.misc.overview_focus}
           {active === 'tools' && `${D.tools?.length || 0} HERRAMIENTAS · ${(D.totals?.toolCalls || 0).toLocaleString('es-ES')} LLAMADAS · ${D.totals?.daysActive || 0} DÍAS`}
           {active === 'tokens' && `${D.totals?.models || 0} MODELOS · ${formatCompact(D.totals?.tokens || 0)} TOKENS · ${formatCompact(D.totals?.cacheReadTokens || 0)} CACHE`}
           {active === 'errors' && `${D.errors?.length || 0} INCIDENCIAS · ${(D.errorTrend || []).length} DÍAS CON TRAZA · LOG-BASED`}
@@ -200,6 +211,7 @@ function App() {
     const h = location.hash.replace('#', '');
     return NAV.find(n => n.id === h) ? h : 'overview';
   });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -210,6 +222,17 @@ function App() {
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'b') return;
+      if (isTypingTarget(event.target)) return;
+      event.preventDefault();
+      setSidebarCollapsed((value) => !value);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -226,6 +249,8 @@ function App() {
     if (main) main.scrollTop = 0;
   };
 
+  const toggleSidebar = () => setSidebarCollapsed((value) => !value);
+
   if (loading) return <LoadingScreen />;
   if (error) return <ErrorScreen message={error} />;
 
@@ -233,8 +258,17 @@ function App() {
   const t = HERMES_I18N[lang];
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar active={active} onSelect={handleSelect} t={t} tweaks={tweaks} setTweak={setTweak} />
+      <button
+        className={`sidebar-edge-toggle ${sidebarCollapsed ? 'collapsed' : ''}`}
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+      >
+        <span>{sidebarCollapsed ? '\u00BB' : '\u00AB'}</span>
+      </button>
       <main className="main">
         <div className="matrix-bg" />
         <div className="main-inner">

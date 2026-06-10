@@ -6,6 +6,9 @@ import time
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, send_from_directory
 
+from agent_log_metrics import parse_agent_log_metrics
+from economic_classes import build_economic_breakdown, build_provider_usage_breakdown, get_provider_catalog
+
 app = Flask(__name__, static_folder='static')
 
 # Register MIME types for JSX files (Babel standalone needs correct MIME)
@@ -16,6 +19,52 @@ mimetypes.add_type('text/javascript', '.mjs')
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "dashboard.db")
 
 COLLECTOR_PATH = os.path.join(os.path.dirname(__file__), "..", "collector.py")
+
+
+def env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_dashboard_runtime():
+    access_mode = (os.getenv("HERMES_DASHBOARD_ACCESS_MODE") or "").strip().lower()
+    host = (os.getenv("HERMES_DASHBOARD_HOST") or "").strip()
+
+    if not host:
+        host = "0.0.0.0" if access_mode == "network" else "127.0.0.1"
+
+    port_value = (os.getenv("HERMES_DASHBOARD_PORT") or "8590").strip()
+    try:
+        port = int(port_value)
+    except ValueError:
+        print(f"[dashboard] Invalid HERMES_DASHBOARD_PORT={port_value!r}; using 8590")
+        port = 8590
+
+    debug = env_flag("HERMES_DASHBOARD_DEBUG", True)
+    network_enabled = host not in {"127.0.0.1", "localhost", "::1"}
+
+    return {
+        "access_mode": access_mode or ("network" if network_enabled else "localhost"),
+        "host": host,
+        "port": port,
+        "debug": debug,
+        "network_enabled": network_enabled,
+        "local_url": f"http://localhost:{port}",
+    }
+
+
+def print_startup_summary(config):
+    print("Hermes Dashboard running")
+    print(f"- Local:   {config['local_url']}")
+    print(f"- Network: {'enabled' if config['network_enabled'] else 'disabled'}")
+
+    if config["network_enabled"]:
+        print(
+            "Warning: dashboard is reachable from LAN/VPN. "
+            "Do not expose to public internet without auth/HTTPS."
+        )
 
 
 def run_collector():
@@ -48,88 +97,12 @@ def run_collector():
         print(f"error: {e}")
 
 
-import re
-from collections import defaultdict
-
 AGENT_LOG_PATH = os.path.expanduser("~/AppData/Local/hermes/logs/agent.log")
 
 
 def load_agent_log_metrics():
-    """Parse agent.log for response latency, api_calls, and chars per response.
-    
-    Returns dict with avg/median/P95 metrics and daily trend.
-    """
-    log_path = os.path.expanduser("~/AppData/Local/hermes/logs/agent.log")
-    if not os.path.exists(log_path):
-        return {"avgTime": 0, "medianTime": 0, "p95Time": 0, "avgApiCalls": 0,
-                "totalResponses": 0, "trend": [], "audioCount": 0, "fallbackCount": 0}
-    
-    # Read last 200KB for recent metrics
-    size = os.path.getsize(log_path)
-    with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-        if size > 204800:
-            f.seek(size - 204800)
-            f.readline()  # skip partial line
-        content = f.read()
-    
-    times = []
-    calls = []
-    chars = []
-    daily_times = defaultdict(list)
-    audio_count = 0
-    fallback_count = 0
-    warning_count = 0
-    
-    for line in content.split('\n'):
-        # Response metrics
-        m = re.search(r'response ready:.*?time=([\d.]+)s api_calls=(\d+) response=(\d+) chars', line)
-        if m:
-            t = float(m.group(1))
-            times.append(t)
-            calls.append(int(m.group(2)))
-            chars.append(int(m.group(3)))
-            # Extract date from log line
-            date_m = re.match(r'(\d{4}-\d{2}-\d{2})', line)
-            if date_m:
-                daily_times[date_m.group(1)].append(t)
-        
-        if 'Processing audio with duration' in line:
-            audio_count += 1
-        if 'fallback' in line.lower():
-            fallback_count += 1
-        if 'WARNING' in line:
-            warning_count += 1
-    
-    if not times:
-        return {"avgTime": 0, "medianTime": 0, "p95Time": 0, "avgApiCalls": 0,
-                "totalResponses": 0, "trend": [], "audioCount": 0, "fallbackCount": 0}
-    
-    times_sorted = sorted(times)
-    n = len(times_sorted)
-    median_t = times_sorted[n // 2]
-    p95_t = times_sorted[int(n * 0.95)]
-    
-    # Daily avg time trend (last 30 days)
-    trend = []
-    for day in sorted(daily_times.keys())[-30:]:
-        day_times = daily_times[day]
-        trend.append({"date": day, "avgTime": round(sum(day_times) / len(day_times), 1),
-                      "count": len(day_times)})
-    
-    return {
-        "avgTime": round(sum(times) / n, 1),
-        "medianTime": round(median_t, 1),
-        "p95Time": round(p95_t, 1),
-        "minTime": round(min(times), 1),
-        "maxTime": round(max(times), 1),
-        "avgApiCalls": round(sum(calls) / len(calls), 1),
-        "avgChars": round(sum(chars) / len(chars), 0),
-        "totalResponses": n,
-        "trend": trend,
-        "audioCount": audio_count,
-        "fallbackCount": fallback_count,
-        "warningCount": warning_count,
-    }
+    """Parse agent.log for global response latency metrics."""
+    return parse_agent_log_metrics(AGENT_LOG_PATH)
 
 
 def get_db():
@@ -220,6 +193,42 @@ def load_models(conn):
     return models
 
 
+def load_economic_breakdown(conn):
+    c = conn.cursor()
+    c.execute("""
+        SELECT billing_provider,
+               COALESCE(SUM(
+                   COALESCE(input_tokens, 0) +
+                   COALESCE(output_tokens, 0) +
+                   COALESCE(cache_read_tokens, 0) +
+                   COALESCE(cache_write_tokens, 0) +
+                   COALESCE(reasoning_tokens, 0)
+               ), 0) as total_tokens
+        FROM sessions
+        GROUP BY billing_provider
+    """)
+    return build_economic_breakdown([dict(r) for r in c.fetchall()])
+
+
+def load_economic_provider_usage(conn):
+    c = conn.cursor()
+    c.execute("""
+        SELECT billing_provider,
+               COUNT(*) as session_count,
+               GROUP_CONCAT(DISTINCT model) as models,
+               COALESCE(SUM(
+                   COALESCE(input_tokens, 0) +
+                   COALESCE(output_tokens, 0) +
+                   COALESCE(cache_read_tokens, 0) +
+                   COALESCE(cache_write_tokens, 0) +
+                   COALESCE(reasoning_tokens, 0)
+               ), 0) as total_tokens
+        FROM sessions
+        GROUP BY billing_provider
+    """)
+    return build_provider_usage_breakdown([dict(r) for r in c.fetchall()])
+
+
 def load_tokens_per_day(conn, models):
     c = conn.cursor()
     c.execute("SELECT MIN(started_at) as min_ts, MAX(started_at) as max_ts FROM sessions WHERE started_at IS NOT NULL")
@@ -270,6 +279,49 @@ def load_tools(conn):
         daily[rd['day']][rd['tool_name']] = rd['count']
 
     return {'tools': tools, 'daily': daily}
+
+
+def load_tool_token_usage(conn):
+    """Attribute session tokens across tool calls in the same session."""
+    c = conn.cursor()
+    c.execute("""
+        WITH session_tool_counts AS (
+            SELECT session_id, COUNT(*) as actual_tool_calls
+            FROM tool_usage
+            GROUP BY session_id
+        ),
+        session_tokens AS (
+            SELECT id as session_id,
+                   COALESCE(input_tokens, 0) +
+                   COALESCE(output_tokens, 0) +
+                   COALESCE(cache_read_tokens, 0) +
+                   COALESCE(cache_write_tokens, 0) +
+                   COALESCE(reasoning_tokens, 0) as tokens
+            FROM sessions
+        )
+        SELECT tu.tool_name,
+               COUNT(*) as calls,
+               COUNT(DISTINCT tu.session_id) as sessions,
+               COALESCE(SUM(CAST(st.tokens AS REAL) / NULLIF(stc.actual_tool_calls, 0)), 0) as attributed_tokens,
+               ROUND(CAST(SUM(CASE WHEN tu.success = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100, 1) as success_rate
+        FROM tool_usage tu
+        JOIN session_tool_counts stc ON stc.session_id = tu.session_id
+        JOIN session_tokens st ON st.session_id = tu.session_id
+        GROUP BY tu.tool_name
+        ORDER BY attributed_tokens DESC
+    """)
+    rows = []
+    for i, r in enumerate(c.fetchall()):
+        rd = dict(r)
+        rows.append({
+            'name': rd['tool_name'],
+            'tokens': int(round(rd['attributed_tokens'] or 0)),
+            'calls': rd['calls'] or 0,
+            'sessions': rd['sessions'] or 0,
+            'success': (rd['success_rate'] or 0) / 100.0,
+            'color': TOOL_COLORS[i % len(TOOL_COLORS)],
+        })
+    return rows
 
 
 def load_sources(conn):
@@ -345,7 +397,7 @@ def load_error_trend(conn):
 
 
 def load_sessions_analytics(conn):
-    """Per-session analytics: avg tokens, throughput, duration, tools, models used."""
+    """Per-session analytics: avg tokens, generation throughput, duration, tools, models used."""
     c = conn.cursor()
     
     # Aggregate per-session averages
@@ -362,10 +414,10 @@ def load_sessions_analytics(conn):
     """)
     aggregates = dict(c.fetchone())
     
-    # Token throughput per session (tokens/s)
+    # Generation throughput per session (output + reasoning tokens/s)
     c.execute("""
         SELECT 
-            ROUND(AVG((input_tokens + output_tokens + reasoning_tokens) * 1.0 / 
+            ROUND(AVG((COALESCE(output_tokens, 0) + COALESCE(reasoning_tokens, 0)) * 1.0 / 
                  NULLIF(ended_at - started_at, 0)), 2) as avg_throughput
         FROM sessions 
         WHERE ended_at IS NOT NULL AND started_at IS NOT NULL 
@@ -477,14 +529,14 @@ def load_openrouter(conn):
 
 
 def load_system_health(conn):
-    """Global system metrics: throughput, error rate, fallback rate, interruption rate."""
+    """Global system metrics: generation throughput, error rate, fallback rate, interruption rate."""
     c = conn.cursor()
     
-    # Token throughput global
+    # Generation throughput global (output + reasoning tokens/s).
     c.execute("""
         SELECT 
             CASE WHEN SUM(ended_at - started_at) > 0 
-                THEN ROUND(SUM(input_tokens + output_tokens + reasoning_tokens) * 1.0 / 
+                THEN ROUND(SUM(COALESCE(output_tokens, 0) + COALESCE(reasoning_tokens, 0)) * 1.0 / 
                      SUM(ended_at - started_at), 2)
                 ELSE 0 
             END as global_throughput
@@ -493,6 +545,32 @@ def load_system_health(conn):
           AND (ended_at - started_at) > 0
     """)
     global_tp = dict(c.fetchone())['global_throughput'] or 0
+
+    c.execute("""
+        SELECT 
+            MAX(ROUND((COALESCE(output_tokens, 0) + COALESCE(reasoning_tokens, 0)) * 1.0 / 
+                (ended_at - started_at), 2)) as peak_throughput
+        FROM sessions 
+        WHERE ended_at IS NOT NULL AND started_at IS NOT NULL 
+          AND (ended_at - started_at) > 0
+    """)
+    peak_tp = dict(c.fetchone())['peak_throughput'] or 0
+
+    # Processing throughput keeps the old definition for diagnostics: input + output + reasoning.
+    c.execute("""
+        SELECT 
+            CASE WHEN SUM(ended_at - started_at) > 0 
+                THEN ROUND(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(reasoning_tokens, 0)) * 1.0 / 
+                     SUM(ended_at - started_at), 2)
+                ELSE 0 
+            END as global_processing_throughput,
+            MAX(ROUND((COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(reasoning_tokens, 0)) * 1.0 / 
+                (ended_at - started_at), 2)) as peak_processing_throughput
+        FROM sessions 
+        WHERE ended_at IS NOT NULL AND started_at IS NOT NULL 
+          AND (ended_at - started_at) > 0
+    """)
+    processing_tp = dict(c.fetchone())
     
     # Error rate from errors_log (real system errors)
     c.execute("""SELECT COUNT(*) FROM errors_log""")
@@ -544,6 +622,9 @@ def load_system_health(conn):
     
     return {
         'globalThroughput': global_tp,
+        'peakThroughput': peak_tp,
+        'globalProcessingThroughput': processing_tp['global_processing_throughput'] or 0,
+        'peakProcessingThroughput': processing_tp['peak_processing_throughput'] or 0,
         'errorRate': err_rate,
         'totalToolCalls': total_tc,
         'failedToolCalls': failures,
@@ -682,9 +763,13 @@ def api_all():
         tools_data = load_tools(conn)
         return jsonify({
             'models': models,
+            'economicBreakdown': load_economic_breakdown(conn),
+            'economicProviderUsage': load_economic_provider_usage(conn),
+            'providerCatalog': get_provider_catalog(),
             'days': [(today - timedelta(days=i)).isoformat() for i in range(days_since - 1, -1, -1)],
             'tokensPerDay': load_tokens_per_day(conn, models),
             'tools': tools_data['tools'], 'toolDaily': tools_data['daily'],
+            'toolTokenUsage': load_tool_token_usage(conn),
             'toolColors': TOOL_COLORS,
             'sources': load_sources(conn), 'recentSessions': load_recent_sessions(conn, 10),
             'errors': load_errors(conn), 'errorTrend': load_error_trend(conn),
@@ -735,5 +820,6 @@ def static_files(path):
 
 if __name__ == '__main__':
     run_collector()
-    print(f"🚀 Hermes Dashboard API + React on http://localhost:8590")
-    app.run(host='0.0.0.0', port=8590, debug=True)
+    runtime = resolve_dashboard_runtime()
+    print_startup_summary(runtime)
+    app.run(host=runtime["host"], port=runtime["port"], debug=runtime["debug"])

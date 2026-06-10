@@ -1,7 +1,7 @@
 # Hermes Dashboard Launcher for PowerShell
 $ErrorActionPreference = "Stop"
 
-$dashboardDir = "$env:USERPROFILE\hermes-dashboard\api"
+$dashboardDir = Join-Path $PSScriptRoot "api"
 $venvPython = "$env:LOCALAPPDATA\hermes\hermes-agent\venv\Scripts\python.exe"
 
 # Try Hermes venv first
@@ -21,7 +21,11 @@ try {
     & $python -m pip install flask pandas
 }
 
-Write-Host "[Hermes Dashboard] Starting on http://localhost:8590" -ForegroundColor Cyan
+$env:HERMES_DASHBOARD_ACCESS_MODE = "localhost"
+$env:HERMES_DASHBOARD_HOST = "127.0.0.1"
+$env:HERMES_DASHBOARD_PORT = "8590"
+
+Write-Host "[Hermes Dashboard] Starting in localhost-only mode on http://localhost:8590" -ForegroundColor Cyan
 Start-Process "http://localhost:8590"
 Set-Location $dashboardDir
 & $python flask_app.py
