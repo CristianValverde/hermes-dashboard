@@ -19,9 +19,21 @@ fix_errors_tab.py
 old_errors_function.txt
 skill-catalog.json
 mejoras_dashboard.md
+.playwright-mcp/
+screenshot.png
+*-validate-*.png
+sessions-validation-*.png
+sessions-unified-*.png
+errors-continue-*.png
+errors-no-user-interrupt-*.png
+errors-tab-after-refactor*.png
+errors-remediation-queue.png
+errors-triage-queue.png
+sidebar-tokens-after.png
 
 # Python venv
 api/venv/
 __pycache__/
 *.pyc
 *.pid
+tests/__pycache__/
