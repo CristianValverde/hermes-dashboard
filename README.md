@@ -17,33 +17,39 @@ It is built for one job: understand how your Hermes usage is behaving without di
 
 ### Overview
 
-![Overview dashboard](./overview-unified.png)
+| Desktop | Mobile |
+| --- | --- |
+| ![Overview desktop dashboard](./overview-unified.png) | ![Overview mobile dashboard](./overview-mobile.png) |
 
 ### Tools
 
-![Tools dashboard](./tools-unified.png)
+| Desktop | Mobile |
+| --- | --- |
+| ![Tools desktop dashboard](./tools-unified.png) | ![Tools mobile dashboard](./tools-mobile.png) |
 
 ### Tokens
 
-![Tokens dashboard](./tokens-unified.png)
+| Desktop | Mobile |
+| --- | --- |
+| ![Tokens desktop dashboard](./tokens-unified.png) | ![Tokens mobile dashboard](./tokens-mobile.png) |
 
 ### Errors
 
-![Errors dashboard](./errors-unified.png)
+| Desktop | Mobile |
+| --- | --- |
+| ![Errors desktop dashboard](./errors-unified.png) | ![Errors mobile dashboard](./errors-mobile.png) |
 
 ### Sessions
 
-![Sessions dashboard](./sessions-final-desktop.png)
+| Desktop | Mobile |
+| --- | --- |
+| ![Sessions desktop dashboard](./sessions-final-desktop.png) | ![Sessions mobile dashboard](./sessions-final-mobile.png) |
 
 ### System
 
-![System dashboard](./system-revamp-desktop.png)
-
-### Mobile
-
-| Sessions | System |
+| Desktop | Mobile |
 | --- | --- |
-| ![Sessions mobile dashboard](./sessions-final-mobile.png) | ![System mobile dashboard](./system-revamp-mobile.png) |
+| ![System desktop dashboard](./system-revamp-desktop.png) | ![System mobile dashboard](./system-revamp-mobile.png) |
 
 ## Stack
 
