@@ -1,0 +1,17 @@
+# Copy this file to config.yaml and adjust it for your machine.
+# config.yaml is ignored by git, so your local paths stay private.
+
+collection:
+  api_timeout: 15
+  suggested_interval: hourly
+
+dashboard:
+  db_path: dashboard.db
+
+# Folder where Hermes keeps its data (state.db, auth.json).
+# Optional: if omitted, the collector looks for it in %LOCALAPPDATA%\hermes on Windows.
+# Set it when the collector runs somewhere that path is not visible, for example from WSL:
+# hermes_dir: /mnt/c/Users/<your-user>/AppData/Local/hermes
+
+openrouter:
+  base_url: https://openrouter.ai/api/v1
