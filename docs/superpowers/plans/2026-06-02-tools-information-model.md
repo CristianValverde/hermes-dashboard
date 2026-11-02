@@ -30,7 +30,7 @@
 Run:
 
 ```powershell
-rg -n --hidden -A 120 "function SectionTools" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/sections.jsx"
+rg -n --hidden -A 120 "function SectionTools" "api/static/sections.jsx"
 ```
 
 Expected: Output starts at `function SectionTools({ t })` and shows the current stat cards, chips, stacked bar, donut, and ranking table.
@@ -122,7 +122,7 @@ Replace the lines from `const totalCalls = ...` through `const toolDist = ...` w
 Run:
 
 ```powershell
-rg -n --hidden "ToolIdentityCard|dailyToolTooltip|toolLegendTooltip|toolDistributionTooltip|topToolCount" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/sections.jsx"
+rg -n --hidden "ToolIdentityCard|dailyToolTooltip|toolLegendTooltip|toolDistributionTooltip|topToolCount" "api/static/sections.jsx"
 ```
 
 Expected: Each helper name appears in `sections.jsx`. `topToolCount` appears in calculations and table bar width after Task 4.
@@ -165,7 +165,7 @@ Replace the current four `StatCard` top row with:
 Run:
 
 ```powershell
-rg -n --hidden "sessions_with_tools|AVG .*TOOLS / SES|MOST USED ·" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/sections.jsx"
+rg -n --hidden "sessions_with_tools|AVG .*TOOLS / SES|MOST USED ·" "api/static/sections.jsx"
 ```
 
 Expected: No matches inside `SectionTools`.
@@ -231,7 +231,7 @@ Use this code:
 Run:
 
 ```powershell
-rg -n --hidden "tooltipFormat=\\{dailyToolTooltip\\}|tooltipFormat=\\{toolLegendTooltip\\}|tooltipFormat=\\{toolDistributionTooltip\\}|showLegendValues=\\{false\\}" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/sections.jsx"
+rg -n --hidden "tooltipFormat=\\{dailyToolTooltip\\}|tooltipFormat=\\{toolLegendTooltip\\}|tooltipFormat=\\{toolDistributionTooltip\\}|showLegendValues=\\{false\\}" "api/static/sections.jsx"
 ```
 
 Expected: Four matches.
@@ -277,7 +277,7 @@ Replace the current `{D.tools.map((tool, i) => (` table body mapping with this v
 Run:
 
 ```powershell
-rg -n --hidden "successPct|\\{successPct\\}%" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/sections.jsx"
+rg -n --hidden "successPct|\\{successPct\\}%" "api/static/sections.jsx"
 ```
 
 Expected: Both `successPct` assignment and `{successPct}%` appear.
@@ -318,7 +318,7 @@ In the English `kpi` object, add these keys near the existing tool keys:
 Run:
 
 ```powershell
-rg -n --hidden "tool_invocations|active_tool_days|avg_daily_calls|calls_per_session|failed_calls|most_used" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/i18n.js"
+rg -n --hidden "tool_invocations|active_tool_days|avg_daily_calls|calls_per_session|failed_calls|most_used" "api/static/i18n.js"
 ```
 
 Expected: Twelve matches: six keys in Spanish and six keys in English.
@@ -425,7 +425,7 @@ Inside the narrow mobile media query, add:
 Run:
 
 ```powershell
-rg -n --hidden "tools-top-grid|tools-identity-card|tools-identity-value|tools-identity-foot" "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/static/styles.css"
+rg -n --hidden "tools-top-grid|tools-identity-card|tools-identity-value|tools-identity-foot" "api/static/styles.css"
 ```
 
 Expected: Desktop and responsive rules are present.
@@ -450,7 +450,7 @@ Expected: HTTP status code `200`.
 Run:
 
 ```powershell
-python "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard/api/flask_app.py"
+python "api/flask_app.py"
 ```
 
 Expected: Flask serves the dashboard on `http://localhost:8590`.
@@ -504,7 +504,7 @@ Expected:
 Run:
 
 ```powershell
-git -C "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard" diff -- api/static/sections.jsx api/static/i18n.js api/static/styles.css
+git -C "." diff -- api/static/sections.jsx api/static/i18n.js api/static/styles.css
 ```
 
 Expected: Diff only changes the `Tools` tab, scoped i18n keys, and scoped CSS. It must not redesign other tabs.
@@ -514,7 +514,7 @@ Expected: Diff only changes the `Tools` tab, scoped i18n keys, and scoped CSS. I
 Run:
 
 ```powershell
-git -C "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard" add -- api/static/sections.jsx api/static/i18n.js api/static/styles.css
+git -C "." add -- api/static/sections.jsx api/static/i18n.js api/static/styles.css
 ```
 
 Expected: Only those three files are staged.
@@ -524,7 +524,7 @@ Expected: Only those three files are staged.
 Run:
 
 ```powershell
-git -C "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard" diff --cached --name-only
+git -C "." diff --cached --name-only
 ```
 
 Expected:
@@ -540,7 +540,7 @@ api/static/styles.css
 Run:
 
 ```powershell
-git -C "C:/Users/Cristian Valverde/Git Repos/hermes-dashboard" commit -m "feat: refine tools information model"
+git -C "." commit -m "feat: refine tools information model"
 ```
 
 Expected: Commit succeeds with only the three staged UI files.
