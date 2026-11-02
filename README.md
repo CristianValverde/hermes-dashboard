@@ -1,6 +1,6 @@
 # Hermes Dashboard
 
-Hermes Dashboard is a local analytics cockpit for Hermes activity. It turns collector output into a fast, dark HUD-style dashboard for sessions, tool calls, token consumption, incident patterns, and system health.
+Hermes Dashboard is a local analytics cockpit for Hermes Agent activity. It turns collector output into a fast, dark HUD-style dashboard for sessions, tool calls, token consumption, incident patterns, and system health.
 
 It is built for one job: understand how your Hermes usage is behaving without digging through raw logs.
 
@@ -62,17 +62,28 @@ It is built for one job: understand how your Hermes usage is behaving without di
 
 ```text
 api/
-  flask_app.py        # API + SPA host
+  flask_app.py            # API + SPA host
+  agent_log_metrics.py    # Latency metrics parsed from agent logs
+  economic_classes.py     # Cost classes for provider usage (usage-billable, OSS, subscription-based)
+  requirements.txt        # Python dependencies for the API
   static/
-    app.jsx           # Shell, routing, normalization
-    sections.jsx      # Tab implementations
-    components.jsx    # Shared chart and panel primitives
-    styles.css        # Shared visual system
-collector.py          # Data collection + aggregation
-dashboard.db          # Local analytics store
+    app.jsx               # Shell, routing, normalization
+    sections.jsx          # Tab implementations
+    components.jsx        # Shared chart and panel primitives
+    styles.css            # Shared visual system
+collector.py              # Data collection + aggregation
+config.yaml               # Collector and dashboard settings
+dashboard_schema.sql      # SQLite schema
+dashboard.db              # Local analytics store (generated, not committed)
+scripts/
+  openrouter-credits.py   # Quick OpenRouter balance check
+tests/                    # pytest tests for log metrics and economic classes
 docs/
+  ACCESS_MODES_DESIGN.md
   DASHBOARD_DESIGN_DECISIONS.md
-CONTEXT.md            # Fast-start repository memory
+  PROJECT_CONTEXT.md      # Compatibility pointer to CONTEXT.md
+launch-dashboard.ps1/.bat # Windows launchers (launch-dashboard-network.ps1 for LAN access)
+CONTEXT.md                # Fast-start repository memory
 ```
 
 ## Run It
@@ -80,7 +91,7 @@ CONTEXT.md            # Fast-start repository memory
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r api/requirements.txt
 ```
 
 Run the collector:
@@ -175,3 +186,7 @@ Use the key management page at `https://openrouter.ai/settings/keys`, then run t
 - [CONTEXT.md](./CONTEXT.md): startup snapshot of the repository
 - [docs/DASHBOARD_DESIGN_DECISIONS.md](./docs/DASHBOARD_DESIGN_DECISIONS.md): cross-session UI rules
 - [docs/ACCESS_MODES_DESIGN.md](./docs/ACCESS_MODES_DESIGN.md): localhost vs LAN/VPN access strategy
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
