@@ -1,4 +1,4 @@
-# AGENTS.md instructions for C:\Users\Cristian Valverde\Git Repos\hermes-dashboard
+# AGENTS.md instructions for this repository
 
 ## Repository memory policy
 - After running `/repo-init`, always persist a concise repository snapshot in `CONTEXT.md`.
