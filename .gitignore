@@ -37,3 +37,6 @@ __pycache__/
 *.pyc
 *.pid
 tests/__pycache__/
+
+# Local settings (copy config.example.yaml to config.yaml)
+config.yaml
