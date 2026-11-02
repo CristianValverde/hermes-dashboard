@@ -94,6 +94,14 @@ Install dependencies:
 pip install -r api/requirements.txt
 ```
 
+Optional: create your local settings file (it is ignored by git, so your own paths stay private):
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+If you skip it, the collector looks for the Hermes data folder in `%LOCALAPPDATA%\hermes` on Windows. Set `hermes_dir` in `config.yaml` when it lives elsewhere (for example when running from WSL).
+
 Run the collector:
 
 ```bash
